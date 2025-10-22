@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ride-Hailing — OO & Behavioral Patterns (Observer, Strategy, Command)</title>
+  <style>
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:18px;background:#f6f8fb;color:#0f172a}
+    .grid{display:grid;grid-template-columns:360px 1fr;gap:16px}
+    .card{background:white;border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(12,24,48,0.06)}
+    h2{margin:0 0 10px;font-size:18px}
+    button{padding:8px 12px;border-radius:8px;border:0;background:#2563eb;color:white;cursor:pointer}
+    .muted{color:#6b7280;font-size:13px}
+    .drivers li{margin:8px 0;display:flex;justify-content:space-between;align-items:center}
+    .log{height:220px;overflow:auto;background:#0b1220;color:#cfe9ff;padding:10px;border-radius:8px;font-family:monospace;font-size:13px}
+    select,input{padding:8px;border-radius:8px;border:1px solid #e6e9f0}
+    .topbar{display:flex;gap:8px;align-items:center}
+    .small{font-size:13px}
+  </style>
+</head>
+<body>
+  <h1>Ride-Hailing (OO + Behavioral Patterns)</h1>
+  <p class="muted">This single-file demo implements the <strong>Observer</strong> pattern (rider notified when driver accepts/cancels), the <strong>Strategy</strong> pattern (multiple fare strategies), and the <strong>Command</strong> pattern (book/cancel/rate operations as commands). Open the console for verbose logs.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Controls</h2>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label class="small">Rider name <input id="riderName" value="Himanshu"></label>
+        <label class="small">Pickup <input id="pickup" value="SR University"></label>
+        <label class="small">Drop <input id="drop" value="City Center"></label>
+
+        <div class="topbar">
+          <select id="fareStrategy">
+            <option value="normal">Normal Fare</option>
+            <option value="surge">Surge Pricing (x1.5)</option>
+            <option value="discount">Discount (20% off)</option>
+          </select>
+          <button id="bookBtn">Book Ride</button>
+          <button id="cancelBtn">Cancel Ride</button>
+        </div>
+
+        <label class="small">Rating (1-5) <input id="rating" type="number" min="1" max="5" value="5" style="width:70px"></label>
+        <button id="rateBtn">Rate Ride</button>
+
+        <hr>
+        <h3 class="small">Simulated Drivers</h3>
+        <ul id="driversList" class="drivers"></ul>
+        <small class="muted">Click <em>Accept</em> to simulate a driver accepting the ride. <em>Cancel</em> to simulate driver cancel.</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Live Feed & Status</h2>
+      <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center">
+        <div><strong>Ride Status:</strong> <span id="rideStatus">Idle</span></div>
+        <div><strong>Current Fare:</strong> ₹<span id="currentFare">0.00</span></div>
+      </div>
+
+      <div class="log" id="log"></div>
+
+      <h3 style="margin-top:12px">Pattern Notes</h3>
+      <ul class="muted small">
+        <li><strong>Observer:</strong> Ride is a subject; Riders (UI) observe it and get notified of state changes.</li>
+        <li><strong>Strategy:</strong> FareCalculator accepts a strategy object (Normal/Surge/Discount).</li>
+        <li><strong>Command:</strong> Booking/Cancel/Rate are Commands executed by an Invoker which can maintain history.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    /*********************
+     * Domain Entities (OOP)
+     *********************/
+
+    // Simple utility for logs
+    const logEl = document.getElementById('log');
+    function appLog(...args){
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ` + args.join(' ');
+      logEl.prepend(line);
+      console.log(...args);
+    }
+
+    /********** Observer Pattern **********/
+    // Subject base class
+    class Subject {
+      constructor(){ this.observers = new Set(); }
+      attach(obs){ this.observers.add(obs); }
+      detach(obs){ this.observers.delete(obs); }
+      notify(payload){ this.observers.forEach(o => o.update && o.update(payload)); }
+    }
+
+    // Ride is the Subject observed by UI/rider components
+    class Ride extends Subject{
+      constructor(id, rider, pickup, drop){
+        super();
+        this.id = id; this.rider = rider; this.pickup = pickup; this.drop = drop;
+        this.status = 'PENDING'; // PENDING, ACCEPTED, CANCELLED, ONGOING, COMPLETED
+        this.driver = null; this.fare = 0;
+      }
+      setDriver(driver){ this.driver = driver; }
+      setStatus(status){ this.status = status; this.notify({type:'status', ride:this}); }
+      setFare(fare){ this.fare = fare; this.notify({type:'fare', ride:this}); }
+    }
+
+    /********** Strategy Pattern **********/
+    // Fare strategies must implement calculate(baseFare)
+    class FareStrategy { calculate(base){ return base; } }
+    class NormalFare extends FareStrategy { calculate(base){ return base; } }
+    class SurgeFare extends FareStrategy { constructor(mult=1.5){ super(); this.mult = mult; } calculate(base){ return base * this.mult; } }
+    class DiscountFare extends FareStrategy { constructor(discount=0.2){ super(); this.discount=discount; } calculate(base){ return base * (1-this.discount); } }
+
+    class FareCalculator {
+      constructor(strategy = new NormalFare()){ this.strategy = strategy; }
+      setStrategy(s){ this.strategy = s; }
+      calc(base) { return this.strategy.calculate(base); }
+    }
+
+    /********** Command Pattern **********/
+    // Command interface: execute()
+    class Command { execute(){ throw new Error('execute not implemented'); } }
+
+    class BookRideCommand extends Command{
+      constructor(system, rider, pickup, drop){ super(); this.system = system; this.rider = rider; this.pickup = pickup; this.drop = drop; }
+      execute(){ return this.system.bookRide(this.rider, this.pickup, this.drop); }
+    }
+
+    class CancelRideCommand extends Command{
+      constructor(system, rideId){ super(); this.system = system; this.rideId = rideId; }
+      execute(){ return this.system.cancelRide(this.rideId); }
+    }
+
+    class RateRideCommand extends Command{
+      constructor(system, rideId, rating){ super(); this.system = system; this.rideId = rideId; this.rating = rating; }
+      execute(){ return this.system.rateRide(this.rideId, this.rating); }
+    }
+
+    // Invoker keeps history for potential undo/redo
+    class Invoker { constructor(){ this.history = []; }
+      execute(cmd){ const res = cmd.execute(); this.history.push({cmd,res}); return res; }
+    }
+
+    /********** System (Controller) **********/
+    class RideHailingSystem {
+      constructor(){
+        this.rides = new Map(); this.drivers = [];
+        this.nextId = 1; this.fareCalc = new FareCalculator();
+      }
+
+      registerDriver(driver){ this.drivers.push(driver); }
+
+      bookRide(rider, pickup, drop){
+        const id = `R${this.nextId++}`;
+        const ride = new Ride(id, rider, pickup, drop);
+        this.rides.set(id, ride);
+        appLog('Ride created', id, 'for', rider);
+        // Attach a simple UI observer which updates the DOM
+        ride.attach({ update: (payload)=> { updateUIForRide(ride, payload); } });
+        // notify drivers about new request (in real system you'd send push to drivers)
+        this.drivers.forEach(d => d.notifyNewRide(ride));
+        return ride;
+      }
+
+      cancelRide(rideId){
+        const ride = this.rides.get(rideId);
+        if(!ride) { appLog('Cancel failed, no ride', rideId); return null; }
+        ride.setStatus('CANCELLED');
+        appLog('Ride cancelled', rideId);
+        return ride;
+      }
+
+      rateRide(rideId, rating){
+        const ride = this.rides.get(rideId);
+        if(!ride) { appLog('Rate failed, no ride', rideId); return null; }
+        ride.rating = rating;
+        appLog('Ride rated', rideId, 'rating=', rating);
+        return ride;
+      }
+    }
+
+    /********** Driver (Observer target for new rides) **********/
+    class Driver {
+      constructor(name, system){ this.name = name; this.system = system; }
+      notifyNewRide(ride){ appLog(`Driver ${this.name} notified of ${ride.id} (${ride.pickup}→${ride.drop})`); }
+
+      // Simulate driver accepting the ride — this will change the ride subject
+      acceptRide(ride){
+        if(ride.status !== 'PENDING') { appLog(`${this.name} cannot accept ${ride.id} because status=${ride.status}`); return; }
+        ride.setDriver(this);
+        ride.setStatus('ACCEPTED');
+        appLog(`${this.name} accepted ${ride.id}`);
+      }
+
+      cancelRide(ride){
+        if(ride.status !== 'ACCEPTED') { appLog(`${this.name} cannot cancel ${ride.id} because status=${ride.status}`); return; }
+        ride.setDriver(null);
+        ride.setStatus('CANCELLED');
+        appLog(`${this.name} cancelled ${ride.id}`);
+      }
+    }
+
+    /********** UI & wiring **********/
+    const system = new RideHailingSystem();
+    const invoker = new Invoker();
+
+    // Create a few simulated drivers and register them
+    ['Ravi','Sneha','Amit','Priya'].forEach(n => {
+      const d = new Driver(n, system); system.registerDriver(d);
+    });
+
+    // Render drivers list
+    function renderDrivers(){
+      const list = document.getElementById('driversList'); list.innerHTML = '';
+      system.drivers.forEach((d, idx)=>{
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${d.name}</span>`;
+        const btns = document.createElement('span');
+        const accept = document.createElement('button'); accept.textContent='Accept';
+        accept.style.marginRight='6px';
+        accept.onclick = ()=>{ if(currentRide) d.acceptRide(currentRide); }
+        const cancel = document.createElement('button'); cancel.textContent='Cancel';
+        cancel.style.background='#ef4444'; cancel.onclick = ()=>{ if(currentRide) d.cancelRide(currentRide); }
+        btns.appendChild(accept); btns.appendChild(cancel); li.appendChild(btns);
+        list.appendChild(li);
+      });
+    }
+
+    renderDrivers();
+
+    // Track one current ride for this simple demo
+    let currentRide = null;
+
+    // UI update when ride notifies
+    function updateUIForRide(ride, payload){
+      const statusEl = document.getElementById('rideStatus');
+      const fareEl = document.getElementById('currentFare');
+      statusEl.textContent = ride.status + (ride.driver ? ` (Driver: ${ride.driver.name})` : '');
+      fareEl.textContent = ride.fare.toFixed(2);
+      appLog('UI updated for', ride.id, 'payload=', JSON.stringify(payload.type));
+
+      // If accepted, lock controls
+      if(ride.status === 'ACCEPTED'){
+        document.getElementById('bookBtn').disabled = true;
+      }
+      if(ride.status === 'CANCELLED'){
+        document.getElementById('bookBtn').disabled = false; currentRide = null;
+      }
+    }
+
+    // Wiring buttons to commands
+    document.getElementById('bookBtn').addEventListener('click', ()=>{
+      const rider = document.getElementById('riderName').value || 'Rider';
+      const pickup = document.getElementById('pickup').value;
+      const drop = document.getElementById('drop').value;
+
+      // set chosen fare strategy
+      const strategy = document.getElementById('fareStrategy').value;
+      if(strategy === 'normal') system.fareCalc.setStrategy(new NormalFare());
+      else if(strategy === 'surge') system.fareCalc.setStrategy(new SurgeFare(1.5));
+      else if(strategy === 'discount') system.fareCalc.setStrategy(new DiscountFare(0.2));
+
+      const cmd = new BookRideCommand(system, rider, pickup, drop);
+      const ride = invoker.execute(cmd);
+
+      // compute an initial fare and set it
+      const baseFare = 120; // simple base fare for demo
+      const finalFare = system.fareCalc.calc(baseFare);
+      ride.setFare(finalFare);
+
+      currentRide = ride;
+      appLog('Booked', ride.id, 'fare=', finalFare.toFixed(2));
+    });
+
+    document.getElementById('cancelBtn').addEventListener('click', ()=>{
+      if(!currentRide){ appLog('No active ride to cancel'); return; }
+      const cmd = new CancelRideCommand(system, currentRide.id);
+      invoker.execute(cmd);
+    });
+
+    document.getElementById('rateBtn').addEventListener('click', ()=>{
+      const rating = Number(document.getElementById('rating').value) || 5;
+      if(!currentRide){ appLog('No ride to rate'); return; }
+      const cmd = new RateRideCommand(system, currentRide.id, rating);
+      invoker.execute(cmd);
+    });
+
+    // Initial friendly message
+    appLog('System ready — try booking a ride and then click a driver Accept button to simulate lifecycle.');
+
+  </script>
+</body>
+</html>
